@@ -3,6 +3,7 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
 
 local localPlayer = Players.LocalPlayer
 
@@ -27,7 +28,8 @@ local COLORS = {
 	fpsBad = Color3.fromRGB(255, 90, 130),
 }
 
--- Прозрачность (0 = непрозрачно, 1 = невидимо). Меняй под вкус.
+local AIM_PURPLE = Color3.fromRGB(170, 90, 255)
+
 local T = {
 	menu = 0.22,
 	side = 0.35,
@@ -88,14 +90,170 @@ local SKIES = {
 	},
 }
 
+-- Сохранение настроек
+local SETTINGS_FILE = "skorlypa_menu_settings.json"
+
+local cfg = {
+	lang = "ru",
+	hl = false,
+	tags = false,
+	color = 1,
+	trans = 0.5,
+	sky = 1,
+	time = nil,
+	bright = nil,
+	fly = 60,
+	walk = nil,
+	opt = false,
+	aim = false,
+	aimMode = 1, -- 1 = удерживать P, 2 = переключать P, 3 = всегда
+	aimShowFov = true,
+	aimRadius = 120,
+	aimSmooth = 5,
+	aimPred = 0,
+	aimPart = 1,
+	aimWall = true,
+	aimTeam = false,
+}
+
+local function numberOr(v, lo, hi, default)
+	if type(v) == "number" then
+		return math.clamp(v, lo, hi)
+	end
+	return default
+end
+
+local function loadSettings()
+	local ok, data = pcall(function()
+		if isfile and readfile and isfile(SETTINGS_FILE) then
+			return HttpService:JSONDecode(readfile(SETTINGS_FILE))
+		end
+		return nil
+	end)
+	if not ok or type(data) ~= "table" then
+		return
+	end
+
+	cfg.lang = (data.lang == "en") and "en" or "ru"
+	cfg.hl = data.hl == true
+	cfg.tags = data.tags == true
+	cfg.color = math.floor(numberOr(data.color, 1, #SWATCHES, 1))
+	cfg.trans = numberOr(data.trans, 0, 1, 0.5)
+	cfg.sky = math.floor(numberOr(data.sky, 1, #SKIES, 1))
+	cfg.time = numberOr(data.time, 0, 24, nil)
+	cfg.bright = numberOr(data.bright, 0, 5, nil)
+	cfg.fly = numberOr(data.fly, 10, 200, 60)
+	cfg.walk = numberOr(data.walk, 16, 100, nil)
+	cfg.opt = data.opt == true
+	cfg.aim = data.aim == true
+	cfg.aimMode = math.floor(numberOr(data.aimMode, 1, 3, 1))
+	cfg.aimShowFov = data.aimShowFov ~= false
+	cfg.aimRadius = numberOr(data.aimRadius, 20, 400, 120)
+	cfg.aimSmooth = numberOr(data.aimSmooth, 1, 20, 5)
+	cfg.aimPred = numberOr(data.aimPred, 0, 0.3, 0)
+	cfg.aimPart = math.floor(numberOr(data.aimPart, 1, 2, 1))
+	cfg.aimWall = data.aimWall ~= false
+	cfg.aimTeam = data.aimTeam == true
+end
+
+loadSettings()
+
+local saveToken = 0
+local function saveSettings()
+	saveToken += 1
+	local token = saveToken
+	task.delay(0.5, function()
+		if token ~= saveToken then
+			return
+		end
+		pcall(function()
+			if writefile then
+				writefile(SETTINGS_FILE, HttpService:JSONEncode(cfg))
+			end
+		end)
+	end)
+end
+
 local locked = false
 local isOpen = false
-local hlOn = false
-local tagsOn = false
-local hlColor = SWATCHES[1]
-local hlTransparency = 0.5
+local hlOn = cfg.hl
+local tagsOn = cfg.tags
+local hlColor = SWATCHES[cfg.color]
+local hlTransparency = cfg.trans
 local highlights = {}
 local nameTags = {}
+
+-- Локализация: ключ это русский текст, значение это английский
+local lang = cfg.lang
+local EN = {
+	["Визуал"] = "Visual",
+	["Мир"] = "World",
+	["Игрок"] = "Player",
+	["Аимбот"] = "Aimbot",
+	["Настройки"] = "Settings",
+	["открыть / закрыть"] = "open / close",
+	["Подсветка игроков"] = "Player highlight",
+	["Сквозь стены"] = "Through walls",
+	["Ники"] = "Nametags",
+	["Над головой игроков"] = "Above players' heads",
+	["Цвет подсветки"] = "Highlight color",
+	["Прозрачность"] = "Transparency",
+	["Небо"] = "Sky",
+	["Обычное"] = "Default",
+	["Закат"] = "Sunset",
+	["Ночь"] = "Night",
+	["Космос"] = "Space",
+	["Неон"] = "Neon",
+	["Время суток"] = "Time of day",
+	["Яркость"] = "Brightness",
+	["Полёт"] = "Fly",
+	["Клавиша F"] = "Key: F",
+	["Скорость полёта"] = "Fly speed",
+	["WASD: движение, Пробел: вверх, Ctrl или Q: вниз"] = "WASD: move, Space: up, Ctrl or Q: down",
+	["Ноуклип"] = "Noclip",
+	["Ходьба сквозь стены"] = "Walk through walls",
+	["Скорость игрока"] = "Player speed",
+	["Сбросить скорость"] = "Reset speed",
+	["Наведение на цель"] = "Aim at target",
+	["Активация"] = "Activation",
+	["Удерживать P"] = "Hold P",
+	["Переключать P"] = "Toggle P",
+	["Всегда"] = "Always",
+	["Круг FOV"] = "FOV circle",
+	["Фиолетовая обводка"] = "Purple outline",
+	["Радиус FOV"] = "FOV radius",
+	["Плавность"] = "Smoothness",
+	["Предсказание"] = "Prediction",
+	["Часть тела"] = "Target part",
+	["Голова"] = "Head",
+	["Торс"] = "Torso",
+	["Проверка стен"] = "Wall check",
+	["Не целиться сквозь стены"] = "Ignore through walls",
+	["Проверка команды"] = "Team check",
+	["Не целиться в своих"] = "Skip teammates",
+	["Показатель FPS"] = "FPS counter",
+	["Обновляется каждые полсекунды"] = "Updates every half second",
+	["Язык"] = "Language",
+	["Оптимизация"] = "Optimization",
+	["Прячет текстуры и эффекты"] = "Hides textures and effects",
+	["При выключении текстуры возвращаются обратно"] = "Textures come back when turned off",
+	["Открыть / закрыть меню: RightShift"] = "Open / close menu: RightShift",
+}
+
+local registry = {}
+local applyLanguage
+
+local function tr(text)
+	if lang == "en" then
+		return EN[text] or text
+	end
+	return text
+end
+
+local function reg(obj, text)
+	registry[#registry + 1] = {obj = obj, text = text}
+	obj.Text = tr(text)
+end
 
 local function round(obj, radius)
 	local c = Instance.new("UICorner")
@@ -137,7 +295,7 @@ local function addHover(button, normal, hover)
 	end)
 end
 
-local function label(parent, text, size, font, color, x, y, w, h, align)
+local function label(parent, text, size, font, color, x, y, w, h, align, static)
 	local l = Instance.new("TextLabel")
 	l.BackgroundTransparency = 1
 	l.Text = text
@@ -148,6 +306,9 @@ local function label(parent, text, size, font, color, x, y, w, h, align)
 	l.Size = UDim2.new(0, w, 0, h)
 	l.TextXAlignment = align or Enum.TextXAlignment.Left
 	l.Parent = parent
+	if not static and EN[text] then
+		reg(l, text)
+	end
 	return l
 end
 
@@ -156,7 +317,30 @@ gui.Name = "MenuGui"
 gui.ResetOnSpawn = false
 gui.Parent = localPlayer:WaitForChild("PlayerGui")
 
--- Кнопка открытия (буква S)
+-- Отдельный GUI для круга FOV (без отступа сверху, чтобы совпадал с курсором)
+local fovGui = Instance.new("ScreenGui")
+fovGui.Name = "AimFovGui"
+fovGui.ResetOnSpawn = false
+fovGui.IgnoreGuiInset = true
+fovGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+local fovCircle = Instance.new("Frame")
+fovCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+fovCircle.BackgroundTransparency = 1
+fovCircle.BorderSizePixel = 0
+fovCircle.Visible = false
+fovCircle.Parent = fovGui
+
+local fovCorner = Instance.new("UICorner")
+fovCorner.CornerRadius = UDim.new(1, 0)
+fovCorner.Parent = fovCircle
+
+local fovStroke = Instance.new("UIStroke")
+fovStroke.Thickness = 2
+fovStroke.Color = AIM_PURPLE
+fovStroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+fovStroke.Parent = fovCircle
+
 local openButton = Instance.new("TextButton")
 openButton.Size = UDim2.new(0, 46, 0, 46)
 openButton.Position = UDim2.new(0, 16, 0.5, -23)
@@ -180,7 +364,6 @@ openLetter.TextSize = 24
 openLetter.Parent = openButton
 gradient(openLetter, 45)
 
--- Главное окно
 local menu = Instance.new("Frame")
 menu.Size = UDim2.new(0, W, 0, H)
 menu.Position = UDim2.new(0.5, -W / 2, 0.5, -H / 2)
@@ -197,7 +380,6 @@ local scale = Instance.new("UIScale")
 scale.Scale = 1
 scale.Parent = menu
 
--- Боковая панель (углы скругляет само окно)
 local sidebar = Instance.new("Frame")
 sidebar.Size = UDim2.new(0, SIDE, 1, 0)
 sidebar.BackgroundColor3 = COLORS.bar
@@ -217,7 +399,6 @@ label(logoArea, "visual menu", 11, Enum.Font.Gotham, COLORS.sub, 0, 40, SIDE, 14
 label(sidebar, "RightShift", 12, Enum.Font.GothamBold, COLORS.sub, 0, H - 44, SIDE, 16, Enum.TextXAlignment.Center)
 label(sidebar, "открыть / закрыть", 11, Enum.Font.Gotham, COLORS.sub, 0, H - 28, SIDE, 14, Enum.TextXAlignment.Center)
 
--- Верхняя панель
 local topBar = Instance.new("Frame")
 topBar.Size = UDim2.new(1, -SIDE, 0, 46)
 topBar.Position = UDim2.new(0, SIDE, 0, 0)
@@ -241,7 +422,7 @@ dot.Parent = topBar
 round(dot, 5)
 gradient(dot, 45)
 
-local pageTitle = label(topBar, "Визуал", 18, Enum.Font.GothamBold, COLORS.text, 34, 0, 160, 46)
+local pageTitle = label(topBar, "Визуал", 18, Enum.Font.GothamBold, COLORS.text, 34, 0, 160, 46, nil, true)
 
 local pinButton = Instance.new("TextButton")
 pinButton.Size = UDim2.new(0, 28, 0, 28)
@@ -280,14 +461,6 @@ end
 
 addHover(closeButton, COLORS.button, COLORS.accent)
 
-local function applyLockVisual()
-	if locked then
-		tween(pinButton, 0.15, {BackgroundColor3 = COLORS.accent})
-	else
-		tween(pinButton, 0.15, {BackgroundColor3 = COLORS.button})
-	end
-end
-
 pinButton.MouseEnter:Connect(function()
 	if not locked then
 		tween(pinButton, 0.12, {BackgroundColor3 = COLORS.buttonHover})
@@ -301,10 +474,9 @@ end)
 
 pinButton.MouseButton1Click:Connect(function()
 	locked = not locked
-	applyLockVisual()
+	tween(pinButton, 0.15, {BackgroundColor3 = locked and COLORS.accent or COLORS.button})
 end)
 
--- Страницы
 local function nextOrder(page)
 	local n = (page:GetAttribute("n") or 0) + 1
 	page:SetAttribute("n", n)
@@ -386,7 +558,7 @@ local function makeToggle(page, title, sub, default, callback)
 	return set
 end
 
-local function makeColorRow(page, title, colors, onPick)
+local function makeColorRow(page, title, colors, onPick, initial)
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, -8, 0, 78)
 	row.BackgroundColor3 = COLORS.card
@@ -420,13 +592,13 @@ local function makeColorRow(page, title, colors, onPick)
 			for j, st in ipairs(strokes) do
 				st.Transparency = (j == i) and 0 or 1
 			end
-			onPick(color)
+			onPick(color, i)
 		end)
 	end
-	strokes[1].Transparency = 0
+	strokes[initial or 1].Transparency = 0
 end
 
-local function makeChoiceRow(page, title, options, onPick)
+local function makeChoiceRow(page, title, options, onPick, initial)
 	local rows = math.ceil(#options / 2)
 	local gridH = rows * 34 + (rows - 1) * 8
 
@@ -465,12 +637,12 @@ local function makeChoiceRow(page, title, options, onPick)
 		b.LayoutOrder = i
 		b.BackgroundColor3 = COLORS.button
 		b.BackgroundTransparency = T.button
-		b.Text = name
 		b.TextColor3 = COLORS.text
 		b.Font = Enum.Font.GothamBold
 		b.TextSize = 13
 		b.AutoButtonColor = false
 		b.Parent = grid
+		reg(b, name)
 		round(b, 9)
 		addHover(b, COLORS.button, COLORS.buttonHover)
 
@@ -489,7 +661,7 @@ local function makeChoiceRow(page, title, options, onPick)
 		end)
 	end
 
-	mark(1)
+	mark(initial or 1)
 end
 
 local function makeSlider(page, title, min, max, default, decimals, onChange)
@@ -505,7 +677,7 @@ local function makeSlider(page, title, min, max, default, decimals, onChange)
 	round(row, 12)
 
 	label(row, title, 15, Enum.Font.GothamBold, COLORS.text, 14, 10, 180, 22)
-	local valueLabel = label(row, tostring(default), 13, Enum.Font.GothamBold, COLORS.sub, 0, 10, 60, 22, Enum.TextXAlignment.Right)
+	local valueLabel = label(row, tostring(default), 13, Enum.Font.GothamBold, COLORS.sub, 0, 10, 60, 22, Enum.TextXAlignment.Right, true)
 	valueLabel.Position = UDim2.new(1, -74, 0, 10)
 
 	local hit = Instance.new("TextButton")
@@ -598,6 +770,31 @@ local function makeInfoRow(page, text)
 	l.TextWrapped = true
 end
 
+local function makeButtonRow(page, text, onClick)
+	local row = Instance.new("TextButton")
+	row.Size = UDim2.new(1, -8, 0, 44)
+	row.BackgroundColor3 = COLORS.button
+	row.BackgroundTransparency = T.button
+	row.TextColor3 = COLORS.text
+	row.Font = Enum.Font.GothamBold
+	row.TextSize = 14
+	row.AutoButtonColor = false
+	row.LayoutOrder = nextOrder(page)
+	row.Parent = page
+	reg(row, text)
+	round(row, 12)
+	addHover(row, COLORS.button, COLORS.buttonHover)
+
+	local s = Instance.new("UIStroke")
+	s.Thickness = 2
+	s.Color = Color3.new(1, 1, 1)
+	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+	s.Parent = row
+	gradient(s, 45)
+
+	row.MouseButton1Click:Connect(onClick)
+end
+
 local function makeFpsRow(page)
 	local row = Instance.new("Frame")
 	row.Size = UDim2.new(1, -8, 0, 62)
@@ -611,7 +808,7 @@ local function makeFpsRow(page)
 	label(row, "Показатель FPS", 15, Enum.Font.GothamBold, COLORS.text, 14, 11, 190, 22)
 	label(row, "Обновляется каждые полсекунды", 12, Enum.Font.Gotham, COLORS.sub, 14, 33, 220, 18)
 
-	local value = label(row, "--", 24, Enum.Font.GothamBlack, COLORS.fpsGood, 0, 0, 70, 62, Enum.TextXAlignment.Right)
+	local value = label(row, "--", 24, Enum.Font.GothamBlack, COLORS.fpsGood, 0, 0, 70, 62, Enum.TextXAlignment.Right, true)
 	value.Position = UDim2.new(1, -84, 0, 0)
 
 	local frames = 0
@@ -641,7 +838,6 @@ local function makeFpsRow(page)
 	end)
 end
 
--- Подсветка и ники
 local function updatePlayer(player)
 	if player == localPlayer then
 		return
@@ -734,7 +930,6 @@ end
 Players.PlayerAdded:Connect(trackPlayer)
 Players.PlayerRemoving:Connect(clearPlayer)
 
--- Небо
 local originalSky = Lighting:FindFirstChildOfClass("Sky")
 local originalAtmo = Lighting:FindFirstChildOfClass("Atmosphere")
 local original = {
@@ -830,7 +1025,6 @@ local function applySky(index)
 	timeSet(s.time)
 end
 
--- Оптимизация: текстуры становятся прозрачными, при выключении всё возвращается
 local optToken = 0
 local saved = {}
 local optConns = {}
@@ -971,50 +1165,459 @@ local function setOptimization(state)
 	end
 end
 
--- Вкладки
-local tabNames = {"Визуал", "Мир", "Настройки"}
-local pages = {makePage(), makePage(), makePage()}
+local flyOn = false
+local flySpeed = cfg.fly
+local flyBV, flyBG, flyConn
+local controls
+
+local DEFAULT_WALK_SPEED = 16
+local walkSpeed = cfg.walk
+
+local function applyWalkSpeed()
+	if not walkSpeed then
+		return
+	end
+	local character = localPlayer.Character
+	local hum = character and character:FindFirstChildOfClass("Humanoid")
+	if hum and hum.WalkSpeed ~= walkSpeed then
+		hum.WalkSpeed = walkSpeed
+	end
+end
+
+local function resetWalkSpeed()
+	walkSpeed = nil
+	local character = localPlayer.Character
+	local hum = character and character:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.WalkSpeed = DEFAULT_WALK_SPEED
+	end
+end
+
+RunService.Heartbeat:Connect(applyWalkSpeed)
+
+local function getControls()
+	if controls then
+		return controls
+	end
+	pcall(function()
+		local scripts = localPlayer:FindFirstChild("PlayerScripts")
+		local module = scripts and scripts:FindFirstChild("PlayerModule")
+		if module then
+			controls = require(module):GetControls()
+		end
+	end)
+	return controls
+end
+
+local function stopFly()
+	flyOn = false
+	if flyConn then
+		flyConn:Disconnect()
+		flyConn = nil
+	end
+	if flyBV then
+		flyBV:Destroy()
+		flyBV = nil
+	end
+	if flyBG then
+		flyBG:Destroy()
+		flyBG = nil
+	end
+	local character = localPlayer.Character
+	local hum = character and character:FindFirstChildOfClass("Humanoid")
+	if hum then
+		hum.PlatformStand = false
+	end
+end
+
+local function startFly()
+	local character = localPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local hum = character and character:FindFirstChildOfClass("Humanoid")
+	if not root or not hum then
+		return false
+	end
+
+	stopFly()
+	flyOn = true
+	hum.PlatformStand = true
+
+	flyBV = Instance.new("BodyVelocity")
+	flyBV.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+	flyBV.Velocity = Vector3.zero
+	flyBV.Parent = root
+
+	flyBG = Instance.new("BodyGyro")
+	flyBG.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+	flyBG.P = 10000
+	flyBG.CFrame = root.CFrame
+	flyBG.Parent = root
+
+	local ctrl = getControls()
+
+	flyConn = RunService.RenderStepped:Connect(function()
+		local cam = workspace.CurrentCamera
+		if not cam or not flyBV or not flyBG then
+			return
+		end
+
+		local move = Vector3.zero
+		if ctrl then
+			move = ctrl:GetMoveVector()
+		end
+		local dir = cam.CFrame:VectorToWorldSpace(move)
+
+		local up = 0
+		if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
+			up += 1
+		end
+		if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.Q) then
+			up -= 1
+		end
+
+		local total = dir + Vector3.new(0, up, 0)
+		if total.Magnitude > 0 then
+			total = total.Unit
+		end
+
+		flyBV.Velocity = total * flySpeed
+		flyBG.CFrame = cam.CFrame
+	end)
+
+	return true
+end
+
+-- Ноуклип
+local noclipOn = false
+local noclipConn
+local noclipSaved = {}
+
+local function stopNoclip()
+	noclipOn = false
+	if noclipConn then
+		noclipConn:Disconnect()
+		noclipConn = nil
+	end
+	for part, value in pairs(noclipSaved) do
+		if part and part.Parent then
+			part.CanCollide = value
+		end
+	end
+	table.clear(noclipSaved)
+end
+
+local function startNoclip()
+	stopNoclip()
+	noclipOn = true
+	noclipConn = RunService.Stepped:Connect(function()
+		local character = localPlayer.Character
+		if not character then
+			return
+		end
+		for _, part in ipairs(character:GetDescendants()) do
+			if part:IsA("BasePart") then
+				if noclipSaved[part] == nil then
+					noclipSaved[part] = part.CanCollide
+				end
+				part.CanCollide = false
+			end
+		end
+	end)
+end
+
+-- Аимбот
+local pHeld = false
+local aimToggled = false
+
+local function aimActive()
+	if cfg.aimMode == 1 then
+		return pHeld
+	elseif cfg.aimMode == 2 then
+		return aimToggled
+	end
+	return true
+end
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
+	if input.KeyCode == Enum.KeyCode.P then
+		pHeld = true
+		if cfg.aimMode == 2 then
+			aimToggled = not aimToggled
+		end
+	end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+	if input.KeyCode == Enum.KeyCode.P then
+		pHeld = false
+	end
+end)
+
+local function getAimPart(character)
+	if cfg.aimPart == 1 then
+		return character:FindFirstChild("Head")
+	end
+	return character:FindFirstChild("UpperTorso")
+		or character:FindFirstChild("Torso")
+		or character:FindFirstChild("HumanoidRootPart")
+end
+
+local function isVisible(part, character)
+	local cam = workspace.CurrentCamera
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {localPlayer.Character, character}
+	params.IgnoreWater = true
+	local origin = cam.CFrame.Position
+	local result = workspace:Raycast(origin, part.Position - origin, params)
+	return result == nil
+end
+
+local function getAimTarget()
+	local cam = workspace.CurrentCamera
+	if not cam then
+		return nil
+	end
+
+	local mouse = UserInputService:GetMouseLocation()
+	local bestPos, bestDist
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= localPlayer then
+			local sameTeam = player.Team ~= nil and player.Team == localPlayer.Team
+			if not (cfg.aimTeam and sameTeam) then
+				local character = player.Character
+				local hum = character and character:FindFirstChildOfClass("Humanoid")
+				local part = character and getAimPart(character)
+				if hum and hum.Health > 0 and part then
+					local pos = part.Position
+					if cfg.aimPred > 0 then
+						pos += part.AssemblyLinearVelocity * cfg.aimPred
+					end
+					local screen, onScreen = cam:WorldToViewportPoint(pos)
+					if onScreen then
+						local dist = (Vector2.new(screen.X, screen.Y) - mouse).Magnitude
+						if dist <= cfg.aimRadius and (not bestDist or dist < bestDist) then
+							if not cfg.aimWall or isVisible(part, character) then
+								bestPos = pos
+								bestDist = dist
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return bestPos
+end
+
+RunService:BindToRenderStep("SkorlypaAim", Enum.RenderPriority.Camera.Value + 1, function()
+	local cam = workspace.CurrentCamera
+
+	if cfg.aim and cfg.aimShowFov then
+		local m = UserInputService:GetMouseLocation()
+		fovCircle.Size = UDim2.fromOffset(cfg.aimRadius * 2, cfg.aimRadius * 2)
+		fovCircle.Position = UDim2.fromOffset(m.X, m.Y)
+		fovCircle.Visible = true
+	else
+		fovCircle.Visible = false
+	end
+
+	if not cfg.aim or not cam then
+		return
+	end
+	if not aimActive() then
+		return
+	end
+
+	local target = getAimTarget()
+	if not target then
+		return
+	end
+
+	local goal = CFrame.lookAt(cam.CFrame.Position, target)
+	local alpha = 1 / math.max(cfg.aimSmooth, 1)
+	cam.CFrame = cam.CFrame:Lerp(goal, alpha)
+end)
+
+local tabNames = {"Визуал", "Мир", "Игрок", "Аимбот", "Настройки"}
+local pages = {makePage(), makePage(), makePage(), makePage(), makePage()}
 local tabButtons = {}
+local currentTab = 1
 
--- Вкладка 1: Визуал
-makeToggle(pages[1], "Подсветка игроков", "Сквозь стены", false, function(state)
+-- Вкладка: Визуал
+makeToggle(pages[1], "Подсветка игроков", "Сквозь стены", cfg.hl, function(state)
 	hlOn = state
+	cfg.hl = state
+	saveSettings()
 	refreshAll()
 end)
-makeToggle(pages[1], "Ники", "Над головой игроков", false, function(state)
+makeToggle(pages[1], "Ники", "Над головой игроков", cfg.tags, function(state)
 	tagsOn = state
+	cfg.tags = state
+	saveSettings()
 	refreshAll()
 end)
-makeColorRow(pages[1], "Цвет подсветки", SWATCHES, function(color)
+makeColorRow(pages[1], "Цвет подсветки", SWATCHES, function(color, index)
 	hlColor = color
+	cfg.color = index
+	saveSettings()
 	refreshAll()
-end)
-makeSlider(pages[1], "Прозрачность", 0, 1, 0.5, 2, function(v)
+end, cfg.color)
+makeSlider(pages[1], "Прозрачность", 0, 1, cfg.trans, 2, function(v)
 	hlTransparency = v
+	cfg.trans = v
+	saveSettings()
 	refreshAll()
 end)
 
--- Вкладка 2: Мир
+-- Вкладка: Мир
 local skyNames = {}
 for i, s in ipairs(SKIES) do
 	skyNames[i] = s.name
 end
-makeChoiceRow(pages[2], "Небо", skyNames, applySky)
+makeChoiceRow(pages[2], "Небо", skyNames, function(i)
+	applySky(i)
+	cfg.sky = i
+	cfg.time = nil
+	saveSettings()
+end, cfg.sky)
 
-timeSet = makeSlider(pages[2], "Время суток", 0, 24, math.floor(Lighting.ClockTime * 10 + 0.5) / 10, 1, function(v)
+timeSet = makeSlider(pages[2], "Время суток", 0, 24, cfg.time or (math.floor(Lighting.ClockTime * 10 + 0.5) / 10), 1, function(v)
 	Lighting.ClockTime = v
+	cfg.time = v
+	saveSettings()
 end)
-makeSlider(pages[2], "Яркость", 0, 5, math.floor(Lighting.Brightness * 10 + 0.5) / 10, 1, function(v)
+makeSlider(pages[2], "Яркость", 0, 5, cfg.bright or (math.floor(Lighting.Brightness * 10 + 0.5) / 10), 1, function(v)
 	Lighting.Brightness = v
+	cfg.bright = v
+	saveSettings()
 end)
 
--- Вкладка 3: Настройки
-makeFpsRow(pages[3])
-makeToggle(pages[3], "Оптимизация", "Прячет текстуры и эффекты", false, setOptimization)
-makeInfoRow(pages[3], "При выключении текстуры возвращаются обратно")
-makeInfoRow(pages[3], "Открыть / закрыть меню: RightShift")
+-- Вкладка: Игрок
+local setFlyToggle
+setFlyToggle = makeToggle(pages[3], "Полёт", "Клавиша F", false, function(state)
+	if state then
+		if not startFly() then
+			setFlyToggle(false, true)
+		end
+	else
+		stopFly()
+	end
+end)
+makeSlider(pages[3], "Скорость полёта", 10, 200, cfg.fly, 0, function(v)
+	flySpeed = v
+	cfg.fly = v
+	saveSettings()
+end)
+makeInfoRow(pages[3], "WASD: движение, Пробел: вверх, Ctrl или Q: вниз")
+
+makeToggle(pages[3], "Ноуклип", "Ходьба сквозь стены", false, function(state)
+	if state then
+		startNoclip()
+	else
+		stopNoclip()
+	end
+end)
+
+local setWalkSlider = makeSlider(pages[3], "Скорость игрока", DEFAULT_WALK_SPEED, 100, cfg.walk or DEFAULT_WALK_SPEED, 0, function(v)
+	walkSpeed = v
+	cfg.walk = v
+	saveSettings()
+	applyWalkSpeed()
+end)
+makeButtonRow(pages[3], "Сбросить скорость", function()
+	resetWalkSpeed()
+	setWalkSlider(DEFAULT_WALK_SPEED)
+	cfg.walk = nil
+	saveSettings()
+end)
+
+-- Вкладка: Аимбот
+makeToggle(pages[4], "Аимбот", "Наведение на цель", cfg.aim, function(state)
+	cfg.aim = state
+	saveSettings()
+end)
+makeChoiceRow(pages[4], "Активация", {"Удерживать P", "Переключать P", "Всегда"}, function(i)
+	cfg.aimMode = i
+	aimToggled = false
+	saveSettings()
+end, cfg.aimMode)
+makeToggle(pages[4], "Круг FOV", "Фиолетовая обводка", cfg.aimShowFov, function(state)
+	cfg.aimShowFov = state
+	saveSettings()
+end)
+makeSlider(pages[4], "Радиус FOV", 20, 400, cfg.aimRadius, 0, function(v)
+	cfg.aimRadius = v
+	saveSettings()
+end)
+makeSlider(pages[4], "Плавность", 1, 20, cfg.aimSmooth, 0, function(v)
+	cfg.aimSmooth = v
+	saveSettings()
+end)
+makeSlider(pages[4], "Предсказание", 0, 0.3, cfg.aimPred, 2, function(v)
+	cfg.aimPred = v
+	saveSettings()
+end)
+makeChoiceRow(pages[4], "Часть тела", {"Голова", "Торс"}, function(i)
+	cfg.aimPart = i
+	saveSettings()
+end, cfg.aimPart)
+makeToggle(pages[4], "Проверка стен", "Не целиться сквозь стены", cfg.aimWall, function(state)
+	cfg.aimWall = state
+	saveSettings()
+end)
+makeToggle(pages[4], "Проверка команды", "Не целиться в своих", cfg.aimTeam, function(state)
+	cfg.aimTeam = state
+	saveSettings()
+end)
+
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed then
+		return
+	end
+	if input.KeyCode == Enum.KeyCode.F then
+		setFlyToggle(not flyOn)
+	end
+end)
+
+localPlayer.CharacterAdded:Connect(function()
+	if flyOn then
+		stopFly()
+		setFlyToggle(false, true)
+	end
+	table.clear(noclipSaved)
+end)
+
+-- Вкладка: Настройки
+makeFpsRow(pages[5])
+makeChoiceRow(pages[5], "Язык", {"Русский", "English"}, function(i)
+	lang = (i == 1) and "ru" or "en"
+	cfg.lang = lang
+	saveSettings()
+	applyLanguage()
+end, (cfg.lang == "en") and 2 or 1)
+makeToggle(pages[5], "Оптимизация", "Прячет текстуры и эффекты", cfg.opt, function(state)
+	setOptimization(state)
+	cfg.opt = state
+	saveSettings()
+end)
+makeInfoRow(pages[5], "При выключении текстуры возвращаются обратно")
+makeInfoRow(pages[5], "Открыть / закрыть меню: RightShift")
+
+applyLanguage = function()
+	for _, r in ipairs(registry) do
+		r.obj.Text = tr(r.text)
+	end
+	pageTitle.Text = tr(tabNames[currentTab])
+end
 
 local function selectTab(index)
+	currentTab = index
 	for i, p in ipairs(pages) do
 		p.Visible = (i == index)
 	end
@@ -1026,7 +1629,7 @@ local function selectTab(index)
 		})
 		t.indicator.Visible = on
 	end
-	pageTitle.Text = tabNames[index]
+	pageTitle.Text = tr(tabNames[index])
 end
 
 for i, name in ipairs(tabNames) do
@@ -1035,13 +1638,13 @@ for i, name in ipairs(tabNames) do
 	b.Position = UDim2.new(0, 10, 0, 74 + (i - 1) * 44)
 	b.BackgroundColor3 = COLORS.card
 	b.BackgroundTransparency = 1
-	b.Text = name
 	b.TextColor3 = COLORS.sub
 	b.Font = Enum.Font.GothamBold
 	b.TextSize = 15
 	b.TextXAlignment = Enum.TextXAlignment.Left
 	b.AutoButtonColor = false
 	b.Parent = sidebar
+	reg(b, name)
 	round(b, 10)
 
 	local pad = Instance.new("UIPadding")
@@ -1065,7 +1668,6 @@ for i, name in ipairs(tabNames) do
 	tabButtons[i] = {button = b, indicator = indicator}
 end
 
--- Открытие и закрытие
 local function setOpen(state)
 	isOpen = state
 	openButton.Visible = not state
@@ -1103,7 +1705,6 @@ UserInputService.InputBegan:Connect(function(input, processed)
 	end
 end)
 
--- Перетаскивание
 local function makeDraggable(handle, target)
 	local dragging = false
 	local dragStart
@@ -1142,6 +1743,23 @@ end
 
 makeDraggable(topBar, menu)
 makeDraggable(logoArea, menu)
+
+-- Применяем сохранённые настройки при запуске
+if cfg.sky ~= 1 then
+	applySky(cfg.sky)
+end
+if cfg.time then
+	Lighting.ClockTime = cfg.time
+	timeSet(cfg.time)
+end
+if cfg.bright then
+	Lighting.Brightness = cfg.bright
+end
+if cfg.opt then
+	setOptimization(true)
+end
+refreshAll()
+applyLanguage()
 
 selectTab(1)
 setOpen(true)
